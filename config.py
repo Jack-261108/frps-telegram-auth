@@ -18,7 +18,7 @@ class Config:
 
         # 自动更新配置
         update_data = data.get("auto_update", {})
-        self.auto_update_enabled: bool = update_data.get("enabled", True)
+        self.auto_update_enabled: bool = update_data.get("enabled", False)
         self.auto_update_interval: int = int(update_data.get("interval_seconds", 300))
         self.git_branch: str = update_data.get("branch", "main")
 

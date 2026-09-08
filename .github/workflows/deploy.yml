@@ -1,0 +1,32 @@
+name: Deploy to Tencent Cloud
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH Deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          port: ${{ secrets.SERVER_PORT }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+            echo "🚀 收到代码推送，开始执行部署..."
+            cd /home/ubuntu/frps-telegram-auth
+            git fetch origin main
+            git reset --hard origin/main
+            source venv/bin/activate
+            pip install -r requirements.txt
+            echo "🔄 正在重启 frps-tg-auth 服务..."
+            sudo systemctl restart frps-tg-auth.service
+            sleep 1
+            STATUS=$(systemctl is-active frps-tg-auth.service)
+            echo "✅ 部署完成！服务当前运行状态: $STATUS"

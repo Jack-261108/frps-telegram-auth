@@ -11,7 +11,7 @@
 - 🛡 **实时事前拦截**：基于 FRPS 官方 `NewUserConn` 插件机制，连接建立前拦截，杜绝未授权访问。
 - 📱 **Telegram 交互式审批**：带 Inline 按钮的高颜值卡片，支持【允许单次】、【拒绝】和【临时放行 30 分钟】。
 - 🔒 **纯内网交互**：Telegram 采用长轮询（Long Polling）机制，**无需公网域名或 HTTPS 证书**，开箱即用。
-- ⚡ **自动更新（CI/CD）**：内置 GitHub 自动更新检测，代码推送到 GitHub 后服务器自动拉取并重启守护服务，也支持在 Telegram 发送 `/update` 手动触发。
+- ⚡ **自动部署（CI/CD）**：接入 GitHub Actions，代码一旦 push 到 `main` 分支即可自动 SSH 连接服务器热更新并重启；同时保留 Telegram `/update` 指令随时手动触发。
 - 🐧 **Systemd 托管**：开机自启、故障自动拉起，可通过 `journalctl` 查看实时审计日志。
 
 ---
@@ -94,3 +94,14 @@ journalctl -u frps-tg-auth -f
 - `/start`：测试机器人连通性并获取当前用户的 Chat ID
 - `/status`：查看当前挂起的连接数与临时白名单 IP 列表
 - `/update`：手动触发从 GitHub 拉取最新代码并热重启服务
+
+---
+
+## ⚙️ CI/CD 自动部署机制
+
+本项目通过 `.github/workflows/deploy.yml` 实现了标准的 GitHub Actions 持续部署：
+1. 本地代码 `git push` 到 `main` 分支；
+2. GitHub Actions 自动触发并读取 GitHub Secrets 中的服务器主机、端口与 SSH 密钥；
+3. 远程执行 `git fetch && git reset --hard origin/main`，安装更新的依赖；
+4. 调用 `sudo systemctl restart frps-tg-auth.service` 完成平滑热重启并验证服务状态。
+

@@ -18,8 +18,8 @@ approval_timeout: 30
 # 临时白名单有效时长（秒），例如点击 "放行30分钟" 后的免审批时长
 whitelist_duration: 1800
 
-# 自动更新配置
+# 自动更新配置（若使用 GitHub Actions 自动部署，可保持 false）
 auto_update:
-  enabled: true           # 是否启用自动检测 GitHub 更新
+  enabled: false          # 是否启用内部定时轮询检查（GitHub Actions 模式下建议 false）
   interval_seconds: 300   # 检查间隔（秒）
   branch: "main"          # 监听分支
