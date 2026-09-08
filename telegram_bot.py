@@ -202,6 +202,12 @@ class TelegramManager:
                 pass
             except Exception as e:
                 logger.error(f"Telegram 轮询异常 ({type(e).__name__}: {e})，将在 {error_backoff} 秒后重试")
+                if self.client:
+                    try:
+                        await self.client.aclose()
+                    except Exception:
+                        pass
+                    self.client = None
                 await asyncio.sleep(error_backoff)
                 error_backoff = min(error_backoff * 2, 30)
 
