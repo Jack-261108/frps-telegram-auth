@@ -4,11 +4,11 @@ set -e
 echo "🚀 收到代码推送，开始执行部署..."
 cd /home/ubuntu/frps-telegram-auth
 
-git fetch origin main
+git fetch -q origin main
 git reset --hard origin/main
 
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -q -r requirements.txt
 
 echo "🔄 正在重启 frps-tg-auth 服务..."
 sudo systemctl restart frps-tg-auth.service
