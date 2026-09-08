@@ -1,6 +1,7 @@
 # Telegram Bot 配置
 bot_token: "YOUR_TELEGRAM_BOT_TOKEN" # 从 @BotFather 获取的 Token
 admin_chat_id: 123456789             # 您的 Telegram User ID (可通过对机器人发送 /start 获取)
+telegram_proxy: "http://127.0.0.1:7890" # 可选，国内服务器若无法直连 TG API 可配置本地代理，若无需代理可留空或注释
 
 # 本地服务监听配置
 listen_host: "127.0.0.1"

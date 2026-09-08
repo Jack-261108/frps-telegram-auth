@@ -14,6 +14,7 @@ class Config:
         self.protected_proxies: List[str] = data.get("protected_proxies", ["phone-ssh", "phone"])
         self.approval_timeout: int = int(data.get("approval_timeout", 30))
         self.whitelist_duration: int = int(data.get("whitelist_duration", 1800)) # 30分钟
+        self.telegram_proxy: Optional[str] = data.get("telegram_proxy") or os.environ.get("TELEGRAM_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
 
         # 自动更新配置
         update_data = data.get("auto_update", {})

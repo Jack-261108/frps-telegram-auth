@@ -22,7 +22,11 @@ class TelegramManager:
 
     async def init_client(self):
         if not self.client:
-            self.client = httpx.AsyncClient(timeout=35.0)
+            kwargs = {"timeout": 35.0}
+            if config.telegram_proxy:
+                kwargs["proxy"] = config.telegram_proxy
+                logger.info(f"Telegram 模块使用代理连接: {config.telegram_proxy}")
+            self.client = httpx.AsyncClient(**kwargs)
 
     async def close(self):
         self.is_running = False
