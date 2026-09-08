@@ -62,12 +62,18 @@ class TelegramManager:
         safe_ip = html.escape(str(remote_ip))
         safe_proxy = html.escape(str(proxy_name))
 
+        timeout_str = (
+            f"{config.approval_timeout // 60} 分钟"
+            if config.approval_timeout >= 60 and config.approval_timeout % 60 == 0
+            else f"{config.approval_timeout} 秒"
+        )
+
         text = (
             f"🚨 <b>【FRPS 连接申请拦截】</b>\n\n"
             f"📍 <b>来源 IP:</b> <code>{safe_ip}:{remote_port}</code>\n"
             f"🎯 <b>目标服务:</b> <code>{safe_proxy}</code>\n"
             f"⏰ <b>申请时间:</b> <code>{current_time}</code>\n"
-            f"⏱ <b>有效时间:</b> <code>{config.approval_timeout} 秒</code>\n\n"
+            f"⏱ <b>有效时间:</b> <code>{timeout_str}</code>\n\n"
             f"<i>请在有效期内选择是否放行本次连接：</i>"
         )
 
@@ -78,7 +84,8 @@ class TelegramManager:
                     {"text": "❌ 立即拒绝", "callback_data": f"deny:{conn_id}"}
                 ],
                 [
-                    {"text": "⏱ 允许并放行 30 分钟", "callback_data": f"whitelist:{conn_id}"}
+                    {"text": "⏱ 放行 30 分钟", "callback_data": f"whitelist:{conn_id}"},
+                    {"text": "🚫 封禁此 IP 24小时", "callback_data": f"ban:{conn_id}"}
                 ]
             ]
         }
@@ -130,6 +137,21 @@ class TelegramManager:
             )
         except Exception as e:
             logger.error(f"更新 Telegram 消息失败: {e}")
+
+    async def delete_message(self, message_id: int):
+        """删除指定的 Telegram 消息（用于超时卡片自动销毁）"""
+        if not self.client or not self.admin_chat_id:
+            return
+        try:
+            await self.client.post(
+                f"{self.api_base}/deleteMessage",
+                json={
+                    "chat_id": self.admin_chat_id,
+                    "message_id": message_id
+                }
+            )
+        except Exception as e:
+            logger.error(f"删除 Telegram 消息失败: {e}")
 
     async def answer_callback(self, callback_query_id: str, text: str):
         """给用户的点击弹窗提示 (Toast)"""
@@ -239,13 +261,14 @@ class TelegramManager:
             chat_id = msg.get("chat", {}).get("id")
             from_user = msg.get("from", {})
 
-            if text.startswith("/start"):
+            if text.startswith("/start") or text.startswith("/help"):
                 reply = (
                     f"👋 <b>FRPS Telegram 审批机器人已就绪！</b>\n\n"
                     f"🆔 您的 Chat ID: <code>{chat_id}</code>\n"
                     f"👤 用户名: @{from_user.get('username', 'N/A')}\n\n"
                     f"📌 <b>常用指令:</b>\n"
-                    f"• <code>/status</code>: 查看运行状态与当前白名单\n"
+                    f"• <code>/status</code>: 查看运行状态、黑白名单与等待连接\n"
+                    f"• <code>/unban &lt;IP&gt;</code>: 解除指定 IP 的封禁\n"
                     f"• <code>/update</code>: 检查并从 GitHub 自动更新代码\n"
                     f"• <code>/help</code>: 查看帮助信息"
                 )
@@ -257,6 +280,20 @@ class TelegramManager:
                         json={"chat_id": chat_id, "text": reply, "parse_mode": "HTML"}
                     )
 
+            elif text.startswith("/unban"):
+                if self.admin_chat_id and chat_id != self.admin_chat_id:
+                    return
+                parts = text.split()
+                if len(parts) < 2:
+                    await self.send_simple_message("⚠️ 请输入要解封的 IP，例如：<code>/unban 1.2.3.4</code>")
+                else:
+                    target_ip = parts[1].strip()
+                    from frp_handler import handler
+                    if handler.remove_blacklist(target_ip):
+                        await self.send_simple_message(f"✅ 已成功将 IP <code>{target_ip}</code> 从黑名单移除！")
+                    else:
+                        await self.send_simple_message(f"ℹ️ IP <code>{target_ip}</code> 不在黑名单中。")
+
             elif text.startswith("/update"):
                 if self.admin_chat_id and chat_id != self.admin_chat_id:
                     return
@@ -267,13 +304,22 @@ class TelegramManager:
             elif text.startswith("/status"):
                 from frp_handler import handler
                 whitelist_count = len(handler.ip_whitelist)
+                blacklist_count = len(handler.ip_blacklist)
                 pending_count = len(handler.pending_conns)
+                banned_ips_preview = ""
+                if handler.ip_blacklist:
+                    banned_ips_preview = "\n🚫 <b>当前封禁 IP:</b> " + ", ".join(f"<code>{ip}</code>" for ip in list(handler.ip_blacklist.keys())[:5])
+                    if blacklist_count > 5:
+                        banned_ips_preview += f" 等共 {blacklist_count} 个"
+
                 reply = (
                     f"📊 <b>【系统运行状态】</b>\n\n"
                     f"🛡 <b>服务状态:</b> 🟢 正常运行\n"
                     f"⏳ <b>正在等待审批连接数:</b> {pending_count}\n"
-                    f"📋 <b>当前临时白名单 IP 数量:</b> {whitelist_count}\n"
-                    f"🎯 <b>拦截保护的代理列表:</b> <code>{', '.join(config.protected_proxies)}</code>\n"
+                    f"📋 <b>临时白名单 IP 数量:</b> {whitelist_count}\n"
+                    f"🚫 <b>黑名单封禁 IP 数量:</b> {blacklist_count}"
+                    f"{banned_ips_preview}\n"
+                    f"🎯 <b>拦截保护的代理列表:</b> <code>{', '.join(config.protected_proxies)}</code>"
                 )
                 await self.send_simple_message(reply)
 

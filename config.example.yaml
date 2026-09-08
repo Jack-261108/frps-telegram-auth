@@ -12,11 +12,17 @@ protected_proxies:
   - "phone-ssh"
   - "phone"
 
-# 审批等待超时时间（秒），超时自动拒绝
-approval_timeout: 30
+# 审批等待超时时间（秒），默认 300 秒 (5 分钟)，超时自动拦截
+approval_timeout: 300
 
 # 临时白名单有效时长（秒），例如点击 "放行30分钟" 后的免审批时长
 whitelist_duration: 1800
+
+# 封禁黑名单时长（秒），点击 "封禁此 IP 24小时" 后的静默拦截时长，默认 86400 秒 (24小时)
+ban_duration: 86400
+
+# 审批超时后是否自动删除卡片消息（true 为自动销毁不留痕迹，false 为编辑保留为超时文本）
+auto_delete_timeout: true
 
 # 自动更新配置（若使用 GitHub Actions 自动部署，可保持 false）
 auto_update:

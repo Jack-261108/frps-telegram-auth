@@ -12,8 +12,10 @@ class Config:
         self.listen_host: str = data.get("listen_host", "127.0.0.1")
         self.listen_port: int = int(data.get("listen_port", 8765))
         self.protected_proxies: List[str] = data.get("protected_proxies", ["phone-ssh", "phone"])
-        self.approval_timeout: int = int(data.get("approval_timeout", 30))
+        self.approval_timeout: int = int(data.get("approval_timeout", 300)) # 默认5分钟 (300秒)
         self.whitelist_duration: int = int(data.get("whitelist_duration", 1800)) # 30分钟
+        self.ban_duration: int = int(data.get("ban_duration", 86400)) # 默认封禁24小时
+        self.auto_delete_timeout: bool = bool(data.get("auto_delete_timeout", True)) # 超时是否自动销毁卡片消息
 
         # 代理配置与智能嗅探：优先使用 Cloudflare WARP 官方守护进程 (socks5://127.0.0.1:40000)
         proxy_candidate = (
