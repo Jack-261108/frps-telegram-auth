@@ -1,5 +1,6 @@
 import asyncio
 import html
+import ipaddress
 import logging
 import time
 from typing import Dict, Optional, Callable, Any
@@ -20,6 +21,7 @@ class TelegramManager:
         # 回调处理器绑定
         self.decision_callbacks: Dict[str, Callable[[str, str], None]] = {}
         self.update_trigger_func: Optional[Callable[[], Any]] = None
+        self._ip_geo_cache: Dict[str, str] = {}
 
     def is_configured(self) -> bool:
         """检查凭据是否已经填写真实值，而非占位符"""
@@ -49,6 +51,60 @@ class TelegramManager:
     def unregister_decision_callback(self, conn_id: str):
         self.decision_callbacks.pop(conn_id, None)
 
+    async def get_ip_info(self, ip: str) -> str:
+        """异步查询 IP 物理归属地与运营商（带本地缓存）"""
+        if not ip:
+            return "未知归属地"
+        if ip in self._ip_geo_cache:
+            return self._ip_geo_cache[ip]
+
+        try:
+            addr = ipaddress.ip_address(ip)
+            if addr.is_private or addr.is_loopback:
+                res = "局域网 / 本地回环"
+                self._ip_geo_cache[ip] = res
+                return res
+        except ValueError:
+            pass
+
+        try:
+            # 使用轻量独立的短超时客户端直连解析
+            async with httpx.AsyncClient(timeout=3.0) as geo_client:
+                url = f"http://ip-api.com/json/{ip}?lang=zh-CN"
+                resp = await geo_client.get(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("status") == "success":
+                        country = data.get("country", "")
+                        region = data.get("regionName", "")
+                        city = data.get("city", "")
+                        isp = data.get("isp", "")
+                        org = data.get("org", "")
+                        isp_name = isp or org
+
+                        if "联通" in isp_name or "Unicom" in isp_name:
+                            carrier = "中国联通 ✅"
+                        elif "移动" in isp_name or "Mobile" in isp_name:
+                            carrier = "中国移动 ✅"
+                        elif "电信" in isp_name or "Telecom" in isp_name:
+                            carrier = "中国电信 ✅"
+                        else:
+                            carrier = isp_name
+
+                        loc_parts = [p for p in [country, region, city] if p]
+                        loc_str = " ".join(loc_parts)
+                        if country == "中国":
+                            result = f"{loc_str} · {carrier}" if carrier else loc_str
+                        else:
+                            result = f"{loc_str} · {carrier} (境外/可疑 ⚠️)" if carrier else f"{loc_str} (境外/可疑 ⚠️)"
+
+                        self._ip_geo_cache[ip] = result
+                        return result
+        except Exception as e:
+            logger.warning(f"获取 IP [{ip}] 归属地异常: {e}")
+
+        return "未知归属地"
+
     async def send_approval_card(self, conn_id: str, remote_ip: str, remote_port: int, proxy_name: str) -> Optional[int]:
         """向 Telegram 发送带按钮的审批卡片"""
         if not self.is_configured():
@@ -61,6 +117,8 @@ class TelegramManager:
         current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         safe_ip = html.escape(str(remote_ip))
         safe_proxy = html.escape(str(proxy_name))
+        geo_info = await self.get_ip_info(remote_ip)
+        safe_geo = html.escape(geo_info)
 
         timeout_str = (
             f"{config.approval_timeout // 60} 分钟"
@@ -71,6 +129,7 @@ class TelegramManager:
         text = (
             f"🚨 <b>【FRPS 连接申请拦截】</b>\n\n"
             f"📍 <b>来源 IP:</b> <code>{safe_ip}:{remote_port}</code>\n"
+            f"🌍 <b>物理位置:</b> {safe_geo}\n"
             f"🎯 <b>目标服务:</b> <code>{safe_proxy}</code>\n"
             f"⏰ <b>申请时间:</b> <code>{current_time}</code>\n"
             f"⏱ <b>有效时间:</b> <code>{timeout_str}</code>\n\n"
@@ -116,10 +175,13 @@ class TelegramManager:
 
         safe_ip = html.escape(str(remote_ip))
         safe_proxy = html.escape(str(proxy_name))
+        geo_info = self._ip_geo_cache.get(remote_ip) or await self.get_ip_info(remote_ip)
+        safe_geo = html.escape(geo_info)
 
         text = (
             f"🛡 <b>【FRPS 连接申请 - 审批完成】</b>\n\n"
             f"📍 <b>来源 IP:</b> <code>{safe_ip}</code>\n"
+            f"🌍 <b>物理位置:</b> {safe_geo}\n"
             f"🎯 <b>目标服务:</b> <code>{safe_proxy}</code>\n"
             f"📊 <b>处理结果:</b> {result_text}\n"
             f"⏰ <b>处理时间:</b> <code>{time.strftime('%Y-%m-%d %H:%M:%S')}</code>"
