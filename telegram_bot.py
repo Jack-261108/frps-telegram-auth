@@ -68,40 +68,58 @@ class TelegramManager:
             pass
 
         try:
-            # 使用轻量独立的短超时客户端直连解析
-            async with httpx.AsyncClient(timeout=3.0) as geo_client:
-                url = f"http://ip-api.com/json/{ip}?lang=zh-CN"
-                resp = await geo_client.get(url)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("status") == "success":
-                        country = data.get("country", "")
-                        region = data.get("regionName", "")
-                        city = data.get("city", "")
-                        isp = data.get("isp", "")
-                        org = data.get("org", "")
-                        isp_name = isp or org
+            data = None
+            url = f"http://ip-api.com/json/{ip}?lang=zh-CN"
+            # 优先直连，若遇网络波动则自动尝试通过本地代理兜底
+            clients_to_try = [httpx.AsyncClient(timeout=3.5)]
+            if config.telegram_proxy:
+                clients_to_try.append(httpx.AsyncClient(proxy=config.telegram_proxy, timeout=3.5))
 
-                        if "联通" in isp_name or "Unicom" in isp_name:
-                            carrier = "中国联通 ✅"
-                        elif "移动" in isp_name or "Mobile" in isp_name:
-                            carrier = "中国移动 ✅"
-                        elif "电信" in isp_name or "Telecom" in isp_name:
-                            carrier = "中国电信 ✅"
-                        else:
-                            carrier = isp_name
+            for client in clients_to_try:
+                try:
+                    async with client:
+                        resp = await client.get(url)
+                        if resp.status_code == 200:
+                            res_json = resp.json()
+                            if res_json.get("status") == "success":
+                                data = res_json
+                                break
+                except Exception:
+                    continue
 
-                        loc_parts = [p for p in [country, region, city] if p]
-                        loc_str = " ".join(loc_parts)
-                        if country == "中国":
-                            result = f"{loc_str} · {carrier}" if carrier else loc_str
-                        else:
-                            result = f"{loc_str} · {carrier} (境外/可疑 ⚠️)" if carrier else f"{loc_str} (境外/可疑 ⚠️)"
+            if data:
+                country = data.get("country", "")
+                region = data.get("regionName", "")
+                city = data.get("city", "")
+                isp = data.get("isp", "")
+                org = data.get("org", "")
+                as_info = data.get("as", "")
+                combined = f"{isp} {org} {as_info}".lower()
 
-                        self._ip_geo_cache[ip] = result
-                        return result
+                if any(k in combined for k in ["联通", "unicom", "china169", "cnc group"]):
+                    carrier = "中国联通 ✅"
+                elif any(k in combined for k in ["移动", "mobile", "cmnet"]):
+                    carrier = "中国移动 ✅"
+                elif any(k in combined for k in ["电信", "telecom", "chinanet"]):
+                    carrier = "中国电信 ✅"
+                elif any(k in combined for k in ["广电", "cbn"]):
+                    carrier = "中国广电 ✅"
+                elif any(k in combined for k in ["教育网", "cernet"]):
+                    carrier = "中国教育网 ✅"
+                else:
+                    carrier = isp or org
+
+                loc_parts = [p for p in [country, region, city] if p]
+                loc_str = " ".join(loc_parts)
+                if country == "中国":
+                    result = f"{loc_str} · {carrier}" if carrier else loc_str
+                else:
+                    result = f"{loc_str} · {carrier} (境外/可疑 ⚠️)" if carrier else f"{loc_str} (境外/可疑 ⚠️)"
+
+                self._ip_geo_cache[ip] = result
+                return result
         except Exception as e:
-            logger.warning(f"获取 IP [{ip}] 归属地异常: {e}")
+            logger.warning(f"获取 IP [{ip}] 归属地异常 ({type(e).__name__}): {e}")
 
         return "未知归属地"
 
