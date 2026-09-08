@@ -44,13 +44,17 @@ class FrpHandler:
 
     async def handle_new_user_conn(self, content: dict) -> dict:
         proxy_name = content.get("proxy_name", "")
-        remote_addr = content.get("remote_addr", "") # 格式: "1.2.3.4:56789"
+        remote_addr = content.get("remote_addr", "")
 
-        remote_ip = remote_addr.split(":")[0] if ":" in remote_addr else remote_addr
-        try:
-            remote_port = int(remote_addr.split(":")[1]) if ":" in remote_addr else 0
-        except Exception:
-            remote_port = 0
+        # 支持 IPv4 (1.2.3.4:5678) 和 IPv6 ([2001:db8::1]:5678)
+        if remote_addr.startswith("[") and "]:" in remote_addr:
+            remote_ip, port_str = remote_addr[1:].split("]:", 1)
+            remote_port = int(port_str) if port_str.isdigit() else 0
+        elif ":" in remote_addr:
+            remote_ip, port_str = remote_addr.rsplit(":", 1)
+            remote_port = int(port_str) if port_str.isdigit() else 0
+        else:
+            remote_ip, remote_port = remote_addr, 0
 
         # 1. 检查是否为受保护的代理
         if not self.is_proxy_protected(proxy_name):
@@ -99,6 +103,12 @@ class FrpHandler:
         logger.info(f"拦截到连接: IP={remote_addr} -> 目标代理={proxy_name}，正在向 Telegram 发送审批请求...")
         msg_id = await tg_manager.send_approval_card(conn_id, remote_ip, remote_port, proxy_name)
         conn_info["msg_id"] = msg_id
+
+        if msg_id is None:
+            logger.warning(f"Telegram 审批卡片发送失败（可能未配置 Bot 凭据或网络异常），快速阻断连接: {remote_addr}")
+            tg_manager.unregister_decision_callback(conn_id)
+            self.pending_conns.pop(conn_id, None)
+            return {"reject": True, "reject_reason": "安全审批通道不可用或未配置，已自动拒绝连接！"}
 
         # 5. 异步等待管理员审批
         try:

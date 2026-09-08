@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 import time
 from typing import Dict, Optional, Callable
@@ -48,11 +49,13 @@ class TelegramManager:
 
         await self.init_client()
         current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        safe_ip = html.escape(str(remote_ip))
+        safe_proxy = html.escape(str(proxy_name))
 
         text = (
             f"🚨 <b>【FRPS 连接申请拦截】</b>\n\n"
-            f"📍 <b>来源 IP:</b> <code>{remote_ip}:{remote_port}</code>\n"
-            f"🎯 <b>目标服务:</b> <code>{proxy_name}</code>\n"
+            f"📍 <b>来源 IP:</b> <code>{safe_ip}:{remote_port}</code>\n"
+            f"🎯 <b>目标服务:</b> <code>{safe_proxy}</code>\n"
             f"⏰ <b>申请时间:</b> <code>{current_time}</code>\n"
             f"⏱ <b>有效时间:</b> <code>{config.approval_timeout} 秒</code>\n\n"
             f"<i>请在有效期内选择是否放行本次连接：</i>"
@@ -94,10 +97,13 @@ class TelegramManager:
         if not self.client or not self.admin_chat_id:
             return
 
+        safe_ip = html.escape(str(remote_ip))
+        safe_proxy = html.escape(str(proxy_name))
+
         text = (
             f"🛡 <b>【FRPS 连接申请 - 审批完成】</b>\n\n"
-            f"📍 <b>来源 IP:</b> <code>{remote_ip}</code>\n"
-            f"🎯 <b>目标服务:</b> <code>{proxy_name}</code>\n"
+            f"📍 <b>来源 IP:</b> <code>{safe_ip}</code>\n"
+            f"🎯 <b>目标服务:</b> <code>{safe_proxy}</code>\n"
             f"📊 <b>处理结果:</b> {result_text}\n"
             f"⏰ <b>处理时间:</b> <code>{time.strftime('%Y-%m-%d %H:%M:%S')}</code>"
         )
@@ -153,6 +159,7 @@ class TelegramManager:
         self.is_running = True
         await self.init_client()
         logger.info("Telegram Bot 长轮询模块已启动...")
+        error_backoff = 3
 
         while self.is_running:
             try:
@@ -165,6 +172,8 @@ class TelegramManager:
                     await asyncio.sleep(5)
                     continue
 
+                error_backoff = 3 # 成功收到响应，重置退避时间
+
                 for update in data.get("result", []):
                     self.last_update_id = update["update_id"]
                     await self._handle_update(update)
@@ -172,8 +181,9 @@ class TelegramManager:
             except httpx.TimeoutException:
                 pass
             except Exception as e:
-                logger.error(f"Telegram 轮询异常: {e}")
-                await asyncio.sleep(3)
+                logger.error(f"Telegram 轮询异常 (将在 {error_backoff} 秒后重试): {e}")
+                await asyncio.sleep(error_backoff)
+                error_backoff = min(error_backoff * 2, 30)
 
     async def _handle_update(self, update: dict):
         # 1. 处理按钮点击 (callback_query)
