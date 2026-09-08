@@ -2,7 +2,7 @@ import asyncio
 import html
 import logging
 import time
-from typing import Dict, Optional, Callable
+from typing import Dict, Optional, Callable, Any
 import httpx
 from config import config
 
@@ -19,11 +19,19 @@ class TelegramManager:
 
         # 回调处理器绑定
         self.decision_callbacks: Dict[str, Callable[[str, str], None]] = {}
-        self.update_trigger_func: Optional[Callable[[], None]] = None
+        self.update_trigger_func: Optional[Callable[[], Any]] = None
+
+    def is_configured(self) -> bool:
+        """检查凭据是否已经填写真实值，而非占位符"""
+        if not self.bot_token or self.bot_token == "YOUR_TELEGRAM_BOT_TOKEN":
+            return False
+        if not self.admin_chat_id or self.admin_chat_id in (0, 123456789):
+            return False
+        return True
 
     async def init_client(self):
         if not self.client:
-            kwargs = {"timeout": 35.0}
+            kwargs: dict = {"timeout": 35.0}
             if config.telegram_proxy:
                 kwargs["proxy"] = config.telegram_proxy
                 logger.info(f"Telegram 模块使用代理连接: {config.telegram_proxy}")
@@ -43,11 +51,13 @@ class TelegramManager:
 
     async def send_approval_card(self, conn_id: str, remote_ip: str, remote_port: int, proxy_name: str) -> Optional[int]:
         """向 Telegram 发送带按钮的审批卡片"""
-        if not self.bot_token or not self.admin_chat_id:
-            logger.warning("Telegram Bot Token 或 Admin Chat ID 未配置，无法发送审批卡片！")
+        if not self.is_configured():
+            logger.warning("Telegram Bot Token 或 Admin Chat ID 尚未正确配置（仍为默认占位符），无法发送审批！请在 config.yaml 填写真实凭据。")
             return None
 
         await self.init_client()
+        if not self.client:
+            return None
         current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         safe_ip = html.escape(str(remote_ip))
         safe_proxy = html.escape(str(proxy_name))
@@ -89,7 +99,7 @@ class TelegramManager:
             else:
                 logger.error(f"发送 Telegram 消息失败: {data}")
         except Exception as e:
-            logger.error(f"发送 Telegram 消息异常: {e}")
+            logger.error(f"发送 Telegram 消息异常 ({type(e).__name__}): {e}")
         return None
 
     async def update_message_result(self, message_id: int, remote_ip: str, proxy_name: str, result_text: str):
@@ -123,6 +133,10 @@ class TelegramManager:
 
     async def answer_callback(self, callback_query_id: str, text: str):
         """给用户的点击弹窗提示 (Toast)"""
+        if not self.client:
+            await self.init_client()
+        if not self.client:
+            return
         try:
             await self.client.post(
                 f"{self.api_base}/answerCallbackQuery",
@@ -138,6 +152,8 @@ class TelegramManager:
         if not self.admin_chat_id:
             return
         await self.init_client()
+        if not self.client:
+            return
         try:
             await self.client.post(
                 f"{self.api_base}/sendMessage",
@@ -152,8 +168,8 @@ class TelegramManager:
 
     async def start_polling(self):
         """后台长轮询任务，接收用户点击和命令"""
-        if not self.bot_token:
-            logger.warning("未配置 BOT_TOKEN，Telegram 轮询模块未启动。")
+        if not self.bot_token or self.bot_token == "YOUR_TELEGRAM_BOT_TOKEN":
+            logger.warning("未配置有效的 BOT_TOKEN（仍为占位符），Telegram 轮询模块暂不启动。请在 config.yaml 中配置。")
             return
 
         self.is_running = True
@@ -163,12 +179,16 @@ class TelegramManager:
 
         while self.is_running:
             try:
+                if not self.client:
+                    await self.init_client()
+                assert self.client is not None
                 resp = await self.client.get(
                     f"{self.api_base}/getUpdates",
                     params={"offset": self.last_update_id + 1, "timeout": 25}
                 )
                 data = resp.json()
                 if not data.get("ok"):
+                    logger.error(f"Telegram getUpdates 响应失败: {data}")
                     await asyncio.sleep(5)
                     continue
 
@@ -181,7 +201,7 @@ class TelegramManager:
             except httpx.TimeoutException:
                 pass
             except Exception as e:
-                logger.error(f"Telegram 轮询异常 (将在 {error_backoff} 秒后重试): {e}")
+                logger.error(f"Telegram 轮询异常 ({type(e).__name__}: {e})，将在 {error_backoff} 秒后重试")
                 await asyncio.sleep(error_backoff)
                 error_backoff = min(error_backoff * 2, 30)
 
@@ -223,10 +243,13 @@ class TelegramManager:
                     f"• <code>/update</code>: 检查并从 GitHub 自动更新代码\n"
                     f"• <code>/help</code>: 查看帮助信息"
                 )
-                await self.client.post(
-                    f"{self.api_base}/sendMessage",
-                    json={"chat_id": chat_id, "text": reply, "parse_mode": "HTML"}
-                )
+                if not self.client:
+                    await self.init_client()
+                if self.client:
+                    await self.client.post(
+                        f"{self.api_base}/sendMessage",
+                        json={"chat_id": chat_id, "text": reply, "parse_mode": "HTML"}
+                    )
 
             elif text.startswith("/update"):
                 if self.admin_chat_id and chat_id != self.admin_chat_id:

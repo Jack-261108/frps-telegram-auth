@@ -14,7 +14,24 @@ class Config:
         self.protected_proxies: List[str] = data.get("protected_proxies", ["phone-ssh", "phone"])
         self.approval_timeout: int = int(data.get("approval_timeout", 30))
         self.whitelist_duration: int = int(data.get("whitelist_duration", 1800)) # 30分钟
-        self.telegram_proxy: Optional[str] = data.get("telegram_proxy") or os.environ.get("TELEGRAM_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
+
+        # 代理配置与智能嗅探：显式配置 > 环境变量 > 本地代理端口 (7890, 40000)
+        proxy_candidate = (
+            data.get("telegram_proxy")
+            or os.environ.get("TELEGRAM_PROXY")
+            or os.environ.get("HTTPS_PROXY")
+            or os.environ.get("HTTP_PROXY")
+        )
+        if not proxy_candidate:
+            import socket
+            for port, proto in ((7890, "http"), (40000, "socks5")):
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=0.3):
+                        proxy_candidate = f"{proto}://127.0.0.1:{port}"
+                        break
+                except (OSError, socket.timeout):
+                    pass
+        self.telegram_proxy: Optional[str] = proxy_candidate
 
         # 自动更新配置
         update_data = data.get("auto_update", {})
