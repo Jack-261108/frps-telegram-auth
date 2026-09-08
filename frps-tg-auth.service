@@ -1,0 +1,17 @@
+[Unit]
+Description=FRPS Telegram Interactive Approval Service
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/frps-telegram-auth
+ExecStart=/home/ubuntu/frps-telegram-auth/venv/bin/python3 main.py
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+Environment=CONFIG_PATH=/home/ubuntu/frps-telegram-auth/config.yaml
+
+[Install]
+WantedBy=multi-user.target
